@@ -112,28 +112,57 @@ static int32_t AddDrmBuffer( DRM_DSP_HANDLE hDsp, NX_VID_MEMORY_INFO *pMem )
 		strideHeight[1] = ROUND_UP_16(pMem->height >> 1);
 		strideHeight[2] = strideHeight[1];
 	}
+	else if (DRM_FORMAT_NV12 == pMem->format)
+	{
+		strideWidth[0] = ROUND_UP_32(pMem->stride[0]);
+		strideWidth[1] = ROUND_UP_16(strideWidth[0]);
+		strideHeight[0] = ROUND_UP_16(pMem->height);
+		strideHeight[1] = ROUND_UP_16(pMem->height);
+	}
 	else
 	{
 		printf ( "Fail, not support pMem->format = %d\n", pMem->format );
 		return -1;
 	}
 
-	for( i = 0; i < 3; i++ )	//numPlane
+	if (DRM_FORMAT_YUV420 == pMem->format)
 	{
-		handles[i] = (DRM_FORMAT_YUV420 == pMem->format) ?	// YVU420 ??
-		ImportGemFromFlink( hDsp->drmFd, pMem->flink[0] ) :
-		ImportGemFromFlink( hDsp->drmFd, pMem->flink[i] );
+		for( i = 0; i < 3; i++ )	//numPlane
+		{
+			handles[i] = (DRM_FORMAT_YUV420 == pMem->format) ?
+			ImportGemFromFlink( hDsp->drmFd, pMem->flink[0] ) :
+			ImportGemFromFlink( hDsp->drmFd, pMem->flink[i] );
 
-		pitches[i] = strideWidth[i];
-		offsets[i] = offset;
+			pitches[i] = strideWidth[i];
+			offsets[i] = offset;
 
-		offset += ( (DRM_FORMAT_YUV420 == pMem->format) ? (strideWidth[i] * strideHeight[i]) : 0 );
+			offset += ( (DRM_FORMAT_YUV420 == pMem->format) ? (strideWidth[i] * strideHeight[i]) : 0 );
+		}
+	}
+	else if (DRM_FORMAT_NV12 == pMem->format)
+	{
+		for( i = 0; i < 2; i++ )	//numPlane
+		{
+			handles[i] = (DRM_FORMAT_NV12 == pMem->format) ?
+			ImportGemFromFlink( hDsp->drmFd, pMem->flink[0] ) :
+			ImportGemFromFlink( hDsp->drmFd, pMem->flink[i] );
+
+			pitches[i] = strideWidth[i];
+			offsets[i] = offset;
+
+			offset += ( (DRM_FORMAT_NV12 == pMem->format) ? (strideWidth[i] * strideHeight[i]) : 0 );
+		}
+	}
+	else
+	{
+		printf ( "Fail, not support pMem->format = %d\n", pMem->format );
+		return -1;
 	}
 
 	hDsp->bufferIDs[newIndex] = 0;
 
 	err = drmModeAddFB2( hDsp->drmFd, pMem->width, pMem->height,
-		DRM_FORMAT_YUV420, handles, pitches, offsets, &hDsp->bufferIDs[newIndex], 0);
+		pMem->format, handles, pitches, offsets, &hDsp->bufferIDs[newIndex], 0);
 	if( err < 0 )
 	{
 		printf("drmModeAddFB2() failed !(%d)\n", err);

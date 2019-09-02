@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdarg.h>
 
 #include <sys/time.h>
@@ -234,5 +236,44 @@ int32_t NX_FindPlaneForDisplay(int32_t crtcIdx,
     pDrmPlaneInfo->iPlaneId         = planeId;
 
     return 0;
+}
+
+int32_t NX_IsCpuNXP322X()
+{
+    FILE *pFileCpuInfo = NULL;
+    char *pCpuInfoBuf = NULL;
+    int32_t cpuInfoLen = 0;
+    int32_t findStream = 0;
+    char *pFindStream = NULL;
+
+    pFileCpuInfo = fopen( "/proc/cpuinfo", "rb" );
+    if(pFileCpuInfo == NULL)
+    {
+        printf("Error File Open!\n");
+        return findStream;
+    }
+    pCpuInfoBuf = (char *)malloc(4096);
+    if(pCpuInfoBuf == NULL)
+    {
+        printf("Error malloc!\n");
+        if(pFileCpuInfo)
+            fclose(pFileCpuInfo);
+        return findStream;
+    }
+
+    cpuInfoLen = fread(pCpuInfoBuf, sizeof(char), 4096, pFileCpuInfo);
+    pFindStream = strstr(pCpuInfoBuf, "nxp322x");
+    if(pFindStream)
+    {
+        findStream = 1;  //nxp322x
+    }
+
+    if(pFileCpuInfo)
+        fclose(pFileCpuInfo);
+
+    if(pCpuInfoBuf)
+        free(pCpuInfoBuf);
+
+    return findStream;
 }
 //------------------------------------------------------------------------------

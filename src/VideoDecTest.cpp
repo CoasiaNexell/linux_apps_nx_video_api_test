@@ -57,7 +57,7 @@
 #include "DrmRender.h"
 #endif
 
-#define NX_IMAGE_FORMAT					V4L2_PIX_FMT_YUV420	// V4L2_PIX_FMT_YVU420
+//#define NX_IMAGE_FORMAT					V4L2_PIX_FMT_YUV420	// V4L2_PIX_FMT_YVU420
 #define NX_ADDITIONAL_BUFFER			3
 
 #define NX_ENABLE_FRAME_INFO			false
@@ -109,6 +109,8 @@ static void register_signal( void )
 int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 {
 	NX_V4L2DEC_HANDLE hDec = NULL;
+	int32_t nxImageFormat =	V4L2_PIX_FMT_YUV420;
+	int32_t nxDrmFormat = DRM_FORMAT_YUV420;
 #if ENABLE_DRM_DISPLAY
 	DRM_DSP_HANDLE hDsp = NULL;
 #endif
@@ -133,6 +135,12 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 	//==============================================================================
 	// DISPLAY INITIALIZATION
 	//==============================================================================
+	if( NX_IsCpuNXP322X() )
+	{
+		nxImageFormat =	V4L2_PIX_FMT_NV12;
+		nxDrmFormat = DRM_FORMAT_NV12;
+	}
+
 	{
 #if ENABLE_DRM_DISPLAY
 		drmFd = open("/dev/dri/card0", O_RDWR);
@@ -184,7 +192,7 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 		}
 #endif
 
-		InitDrmDisplay(hDsp, drmDisplayInfo.iPlaneId, drmDisplayInfo.iCrtcId, DRM_FORMAT_YUV420, srcRect, dstRect);
+		InitDrmDisplay(hDsp, drmDisplayInfo.iPlaneId, drmDisplayInfo.iCrtcId, nxDrmFormat, srcRect, dstRect);
 #endif	//	ENABLE_DRM_DISPLAY
 	}
 
@@ -285,8 +293,8 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 
 				seqIn.width       = seqOut.width;
 				seqIn.height      = seqOut.height;
-				seqIn.imgPlaneNum = NX_V4l2GetPlaneNum(NX_IMAGE_FORMAT);
-				seqIn.imgFormat   = NX_IMAGE_FORMAT;
+				seqIn.imgPlaneNum = NX_V4l2GetPlaneNum(nxImageFormat);
+				seqIn.imgFormat   = nxImageFormat;
 				seqIn.numBuffers  = seqOut.minBuffers + NX_ADDITIONAL_BUFFER;
 
 #ifdef ANDROID
