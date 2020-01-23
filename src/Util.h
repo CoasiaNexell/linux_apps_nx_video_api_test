@@ -50,5 +50,6 @@ int32_t NX_FindPlaneForDisplay(int32_t crtcIdx,
 							int32_t findRgb,
 							int32_t layerIdx,
 							MP_DRM_PLANE_INFO *pDrmPlaneInfo);
+int32_t NX_IsCpuNXP322X();
 
 #endif // __UTIL_h__
