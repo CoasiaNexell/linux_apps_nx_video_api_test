@@ -40,6 +40,8 @@ struct DRM_DSP_INFO
 	int32_t		numBuffers;
 	uint32_t	bufferIDs[MAX_DRM_BUFFERS];
 
+	int32_t		dspFlag;
+
 	NX_VID_MEMORY_INFO vidMem[MAX_DRM_BUFFERS];
 	NX_VID_MEMORY_INFO prevMem;
 };
@@ -198,13 +200,15 @@ DRM_DSP_HANDLE CreateDrmDisplay( int fd )
 //	Initialize DRM Display Device
 //
 int32_t InitDrmDisplay( DRM_DSP_HANDLE hDsp, uint32_t planeId, uint32_t crtcId, uint32_t format,
-						DRM_RECT srcRect, DRM_RECT dstRect )
+						DRM_RECT srcRect, DRM_RECT dstRect, uint32_t nonBlock )
 {
 	hDsp->planeID = planeId;
 	hDsp->crtcID = crtcId;
 	hDsp->format = format;
 	hDsp->srcRect = srcRect;
 	hDsp->dstRect = dstRect;
+	if( nonBlock )
+		hDsp->dspFlag |= DRM_MODE_ATOMIC_NONBLOCK;
 	return 0;
 }
 
@@ -229,7 +233,7 @@ int32_t UpdateBuffer( DRM_DSP_HANDLE hDsp, NX_VID_MEMORY_INFO *pMem, NX_VID_MEMO
 	// 	hDsp->srcRect.x, hDsp->srcRect.y, hDsp->srcRect.width, hDsp->srcRect.height,
 	// 	hDsp->dstRect.x, hDsp->dstRect.y, hDsp->dstRect.width, hDsp->dstRect.height );
 
-	err = drmModeSetPlane( hDsp->drmFd, hDsp->planeID, hDsp->crtcID, hDsp->bufferIDs[index], 0,
+	err = drmModeSetPlane( hDsp->drmFd, hDsp->planeID, hDsp->crtcID, hDsp->bufferIDs[index], hDsp->dspFlag,
 			hDsp->dstRect.x, hDsp->dstRect.y, hDsp->dstRect.width, hDsp->dstRect.height,
 			hDsp->srcRect.x<<16, hDsp->srcRect.y<<16, hDsp->srcRect.width<<16, hDsp->srcRect.height<<16);
 
@@ -250,6 +254,38 @@ int32_t UpdateBuffer( DRM_DSP_HANDLE hDsp, NX_VID_MEMORY_INFO *pMem, NX_VID_MEMO
 	return err;
 }
 
+
+int32_t DspVideoSetPriority(DRM_DSP_HANDLE hDsp, int32_t priority)
+{
+	const char *prop_name = "video-priority";
+	int res = -1;
+	unsigned int i = 0;
+	int prop_id = -1;
+	drmModeObjectPropertiesPtr props;
+	props = drmModeObjectGetProperties(hDsp->drmFd, hDsp->planeID, DRM_MODE_OBJECT_PLANE);
+	if (props)
+	{
+		for (i = 0; i < props->count_props; i++)
+		{
+			drmModePropertyPtr prop;
+			prop = drmModeGetProperty(hDsp->drmFd, props->props[i]);
+			if (prop)
+			{
+				if (!strncmp(prop->name, prop_name, DRM_PROP_NAME_LEN))
+				{
+					prop_id = prop->prop_id;
+					drmModeFreeProperty(prop);
+					break;
+				}
+				drmModeFreeProperty(prop);
+			}
+		}
+		drmModeFreeObjectProperties(props);
+	}
+	if(prop_id >= 0)
+		res = drmModeObjectSetProperty(hDsp->drmFd, hDsp->planeID, DRM_MODE_OBJECT_PLANE, prop_id, priority);
+	return res;
+}
 
 void DestroyDrmDisplay( DRM_DSP_HANDLE hDsp )
 {

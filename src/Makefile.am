@@ -15,7 +15,8 @@ video_api_test_LDADD = \
 	-ldrm				\
 	-lnx_video_api		\
 	-lnx_drm_allocator	\
-	-lnx_v4l2
+	-lnx_v4l2 \
+	-lnx_gl_tools
 
 video_api_test_SOURCES = \
 	CodecInfo.cpp		\
@@ -27,6 +28,7 @@ video_api_test_SOURCES = \
 	Util.cpp			\
 	NX_V4l2Utils.cpp	\
 	VideoDecTest.cpp	\
+	VideoDecPostTest.cpp	\
 	VideoEncTest.cpp	\
 	main.cpp
 

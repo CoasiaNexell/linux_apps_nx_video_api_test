@@ -39,15 +39,6 @@
 #include <videodev2_nxp_media.h>
 
 #define ENABLE_DRM_DISPLAY 1
-
-#ifdef ANDROID
-#include "NX_AndroidRenderer.h"
-#define	WINDOW_WIDTH				800 // 1024
-#define	WINDOW_HEIGHT				480 // 600
-#define	NUMBER_OF_BUFFER			12
-#define	MAX_NUMBER_OF_BUFFER		12
-#endif
-
 #define SCREEN_WIDTH				(1024)
 #define SCREEN_HEIGHT				(600)
 
@@ -65,6 +56,23 @@
 
 // #define PLANE_ID		33
 // #define CRTC_ID			32
+
+#include <nx_gl_tools.h>
+enum {
+	POST_PROC_DEINT,
+	POST_PROC_COPY
+};
+
+#define	POST_OUT_BUF_CNT		(4)
+
+typedef struct _POST_PROC_DATA {
+	void		*handle;
+	uint32_t	mode;			//	0 : Deinterlace
+	uint32_t	srcWidth;
+	uint32_t	srcHeight;
+	uint32_t	dstWidth;
+	uint32_t	dstHeight;
+} POST_PROC_DATA, *POSTPROC_HANDLE;
 
 extern bool bExitLoop;
 
@@ -104,8 +112,73 @@ static void register_signal( void )
 	signal( SIGABRT, signal_handler );
 }
 
+POSTPROC_HANDLE InitPostProcessing( uint32_t mode, uint32_t srcWidth, uint32_t srcHeight,
+						 uint32_t dstWidth, uint32_t dstHeight, 
+						 int (*pDstDmaFd)[3], int srcImageFormat, int32_t dstOutBufNum)
+{
+	POSTPROC_HANDLE hPost = (POSTPROC_HANDLE)malloc(sizeof(POST_PROC_DATA));
+	if( mode == POST_PROC_DEINT )		//	Deinterlace
+	{
+		hPost->handle = NX_GlDeinterlaceInit(srcWidth, srcHeight, dstWidth, dstHeight, pDstDmaFd, srcImageFormat, dstOutBufNum);	  /* deinterlace tool handle */
+		if( !hPost->handle )
+		{
+			hPost->mode = POST_PROC_DEINT;
+			free(hPost);
+			return NULL;
+		}
+		hPost->mode = POST_PROC_DEINT;
+		hPost->srcWidth = srcWidth;
+		hPost->srcHeight = srcHeight;
+		hPost->dstWidth = dstWidth;
+		hPost->dstHeight = dstHeight;
+	}
+	else
+	{
+		return NULL;
+	}
+	return hPost;
+}
+
+int PostProcessing(POSTPROC_HANDLE hPost, int *pSrcDmaFds, int *pSrcNDmaFds, int *pDstDmaFds)
+{
+	if( hPost->mode == POST_PROC_DEINT )
+	{
+		return NX_GlDeinterlaceRun(hPost->handle, pSrcDmaFds, pSrcNDmaFds, pDstDmaFds);
+	}
+	return -1;
+}
+
+void DestroyPostProcessing(POSTPROC_HANDLE hPost)
+{
+	if( hPost )
+	{
+		if( hPost->handle )
+		{
+			if( hPost->mode == POST_PROC_DEINT )
+			{
+				NX_GlDeinterlaceDeInit(hPost->handle);
+			}
+		}
+		free( hPost );
+	}
+}
+
+
+void UpdateMinMaxTime( uint64_t &minTime, uint64_t &maxTime, uint64_t time )
+{
+	//	Update Min
+	if( time < minTime )
+		minTime = time;
+	if( time > maxTime )
+		maxTime = time;
+}
+
 //------------------------------------------------------------------------------
-int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
+//	Video Decoder Postprocessing Main
+//
+//	: Decoding -> PostPorcessing (Linux Only)
+//
+int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 {
 	NX_V4L2DEC_HANDLE hDec = NULL;
 	int32_t nxImageFormat =	V4L2_PIX_FMT_YUV420;
@@ -117,6 +190,13 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 	int32_t ret;
 	int32_t imgWidth = -1, imgHeight = -1;
 	int drmFd = 0;
+
+	//	Post processing Output Memory
+	POSTPROC_HANDLE hPost = NULL;
+	NX_VID_MEMORY_HANDLE hPostOutVidMem[POST_OUT_BUF_CNT] = { NULL, };
+	uint32_t postOutBufIdx = 0;
+	int outDmaFd[POST_OUT_BUF_CNT][3];
+
 
 	if( bExitLoop )
 		return -1;
@@ -206,7 +286,8 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 			dstRect.height = SCREEN_HEIGHT;
 		}
 
-		InitDrmDisplay(hDsp, drmDisplayInfo.iPlaneId, drmDisplayInfo.iCrtcId, nxDrmFormat, srcRect, dstRect);
+		//	Init Display
+		InitDrmDisplay(hDsp, drmDisplayInfo.iPlaneId, drmDisplayInfo.iCrtcId, nxDrmFormat, srcRect, dstRect, 1);
 
 		//	Set Video Layer to 0
 		if( pAppData->iDisplayPriority != -1 )
@@ -215,11 +296,6 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 		}
 #endif	//	ENABLE_DRM_DISPLAY
 	}
-
-#ifdef ANDROID
-	CNX_AndroidRenderer *pAndRender = new CNX_AndroidRenderer(WINDOW_WIDTH, WINDOW_HEIGHT);
-	NX_VID_MEMORY_HANDLE *pMemHandle = NULL;
-#endif
 
 	uint32_t v4l2CodecType;
 	int32_t fourcc = -1, codecId = -1;
@@ -243,10 +319,14 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 	{
 		int32_t bInit = false, bSeek = false;
 
-		int frmCnt = 0, size = 0;
-		uint32_t outFrmCnt = 0;
+		int32_t size = 0;
+		uint32_t frmCnt = 0, outFrmCnt = 0;
 		uint64_t startTime, endTime, totalTime = 0;
 		int64_t timeStamp = -1;
+
+		uint64_t postSTime, postETime, postTTime = 0;
+		uint64_t postMinTime=0, postMaxTime=0;
+		uint32_t postProcCnt = 0;
 
 		FILE *fpOut = NULL;
 		int32_t prvIndex = -1, curIndex = -1;
@@ -261,10 +341,13 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 		NX_V4L2DEC_IN decIn;
 		NX_V4L2DEC_OUT decOut;
 
+		int prevFds[4] = {0, };		//	Previous' Frame's FDS
+
 		if (pAppData->outFileName)
 		{
 			fpOut = fopen(pAppData->outFileName, "wb");
-			if (fpOut == NULL) {
+			if (fpOut == NULL)
+			{
 				printf("output file open error!!\n");
 				ret = -1;
 				goto DEC_TERMINATE;
@@ -317,17 +400,6 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 				seqIn.imgFormat   = nxImageFormat;
 				seqIn.numBuffers  = seqOut.minBuffers + NX_ADDITIONAL_BUFFER;
 
-#ifdef ANDROID
-				pAndRender->GetBuffers(seqIn.numBuffers, imgWidth, imgHeight, &pMemHandle );
-				NX_VID_MEMORY_HANDLE hVideoMemory[MAX_NUMBER_OF_BUFFER];
-				for( int32_t i=0 ; i<seqIn.numBuffers ; i++ )
-				{
-					hVideoMemory[i] = pMemHandle[i];
-				}
-				seqIn.pMemHandle = &hVideoMemory[0];
-				seqIn.imgFormat = hVideoMemory[0]->format;
-#endif
-
 				printf("[Sequence Data] width( %d ), height( %d ), plane( %d ), format( 0x%08x ), reqiured buffer( %d ), current buffer( %d )\n",
 					seqIn.width, seqIn.height, seqIn.imgPlaneNum, seqIn.imgFormat, seqIn.numBuffers - NX_ADDITIONAL_BUFFER, seqIn.numBuffers );
 
@@ -340,43 +412,29 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 
 				bInit = true;
 				additionSize = 0;
-				continue;
-			}
 
- 			if (frmCnt == pAppData->iSeekStartFrame && pAppData->iSeekStartFrame)
-			{
-				int32_t seekPos;
-				int64_t duration;
-				pMediaReader->GetDuration(&duration);
+				//==============================================================================
+				// Deinterlace Initialization
+				//==============================================================================
+				for(int32_t i = 0; i < POST_OUT_BUF_CNT; i++)
+				{
+					hPostOutVidMem[i] = NX_AllocateVideoMemory(seqOut.width, seqOut.height, 3, nxImageFormat, 4096);
+					if(hPostOutVidMem[i] == NULL)
+					{
+						printf( "Deinterlace:Failed to allocate Outimage buffer\n");
+						goto DEC_TERMINATE;
+					}
+					outDmaFd[i][0] = hPostOutVidMem[i]->dmaFd[0];
+					outDmaFd[i][1] = hPostOutVidMem[i]->dmaFd[1];
+					outDmaFd[i][2] = hPostOutVidMem[i]->dmaFd[2];
+				}
+				hPost = InitPostProcessing(0, seqOut.width, seqOut.height, seqOut.width, seqOut.height, outDmaFd, nxImageFormat, POST_OUT_BUF_CNT);
+				if(hPost == NULL)
+				{
+					printf( "InitPostProcessing(): Fail pGlHandle is NULL !!\n");
+					goto DEC_TERMINATE;
+				}
 
-				seekPos = (0 > pAppData->iSeekPos) ? duration/1000000 + pAppData->iSeekPos : pAppData->iSeekPos;
-
-				printf("Seek. ( frmCnt(%d frm), seekPos(%d sec) )\n", frmCnt, seekPos );
-				usleep(1000000);
-
-				pMediaReader->SeekStream( seekPos * 1000 );
-
-#if NX_TEST_FLUSH_API
-				NX_V4l2DecFlush( hDec );
-#else
-				do {
-					decIn.strmBuf   = 0;
-					decIn.strmSize  = 0;
-					decIn.timeStamp = 0;
-					decIn.eos       = 1;
-
-					ret = NX_V4l2DecDecodeFrame( hDec, &decIn, &decOut );
-					if( !ret && decOut.dispIdx >= 0 )
-						NX_V4l2DecClrDspFlag( hDec, NULL, decOut.dispIdx );
-				} while( !ret && decOut.dispIdx >= 0 );
-
-				if( prvIndex >= 0 )
-					NX_V4l2DecClrDspFlag( hDec, NULL, prvIndex );
-#endif
-				prvIndex = -1;
-				additionSize = 0;
-				bSeek = true;
-				frmCnt++;
 				continue;
 			}
 
@@ -384,7 +442,8 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 			Skip Bitstream
 			*/
 			if(	(V4L2_PIX_FMT_XVID == v4l2CodecType && 0 < size &&   7 >= size) ||
-				(V4L2_PIX_FMT_DIV5 == v4l2CodecType && 0 < size &&   8 >= size) ) {
+				(V4L2_PIX_FMT_DIV5 == v4l2CodecType && 0 < size &&   8 >= size) )
+			{
 				// NX_DumpData( streamBuffer, (size < 16) ? size : 16, "[     Skip] " );
 				continue;
 			}
@@ -401,7 +460,8 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 				continue;
 			}
 
-			do {
+			do
+			{
 				memset(&decIn, 0, sizeof(NX_V4L2DEC_IN));
 				decIn.strmBuf   = (size > 0) ? streamBuffer : NULL;
 				decIn.strmSize  = (size > 0) ? size + additionSize : 0;
@@ -442,17 +502,47 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 						NX_V4l2DumpMemory(hCurImg, fpOut);
 					}
 
-#if ENABLE_DRM_DISPLAY
-					UpdateBuffer(hDsp, hCurImg, NULL);
-#endif
-
-#ifdef ANDROID
-					pAndRender->DspQueueBuffer( NULL, curIndex );
-					if( prvIndex != -1 )
+					if( prvIndex >= 0 )
 					{
-						pAndRender->DspDequeueBuffer(NULL, NULL);
+						//	Deinterlace : Previous Even + Previous Odd
+						postSTime = NX_GetTickCount();
+						ret = PostProcessing( hPost, prevFds, NULL, hPostOutVidMem[postOutBufIdx]->dmaFd );
+						postETime = NX_GetTickCount();
+						postTTime += (postETime - postSTime);
+						if( postProcCnt == 0 )
+						{
+							postMinTime = postMaxTime = postETime - postSTime;
+						}
+						UpdateMinMaxTime( postMinTime, postMaxTime, postETime-postSTime );
+
+						postProcCnt ++;
+						if (ret < 0)
+						{
+							printf("Fail, PostProcessing(). ret = %d\n", ret );
+							break;
+						}
+#if ENABLE_DRM_DISPLAY
+						UpdateBuffer(hDsp, hPostOutVidMem[postOutBufIdx++], NULL);
+						postOutBufIdx %= POST_OUT_BUF_CNT;
+#endif	//	ENABLE_DRM_DISPLAY
+
+						//	Deinterlace : Previous Even + Previous Odd
+						postSTime = NX_GetTickCount();
+						ret = PostProcessing( hPost, prevFds, decOut.hImg.dmaFd, hPostOutVidMem[postOutBufIdx]->dmaFd );
+						postETime = NX_GetTickCount();
+						postTTime += (postETime - postSTime);
+						UpdateMinMaxTime( postMinTime, postMaxTime, postETime-postSTime );
+						postProcCnt ++;
+						if (ret < 0)
+						{
+							printf("Fail, PostProcessing(). ret = %d\n", ret );
+							break;
+						}
+#if ENABLE_DRM_DISPLAY
+						UpdateBuffer(hDsp, hPostOutVidMem[postOutBufIdx++], NULL);
+						postOutBufIdx %= POST_OUT_BUF_CNT;
+#endif	//	ENABLE_DRM_DISPLAY
 					}
-#endif
 
 					if( pAppData->dumpFileName && outFrmCnt==pAppData->dumpFrameNumber )
 					{
@@ -471,6 +561,8 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 					}
 
 					prvIndex = curIndex;
+					for( int ii=0 ; ii<4 ; ii++ )
+						prevFds[ii] = decOut.hImg.dmaFd[ii];
 					outFrmCnt++;
 				}
 
@@ -496,6 +588,16 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 
 		if (fpOut)
 			fclose(fpOut);
+
+		printf(" Post Porcessing Result :\n");
+		printf("     outFrameCnt  = %d\n", outFrmCnt);
+		printf("     postProcCnt  = %d\n", postProcCnt);
+		printf("     Total Time   = %lld\n", postTTime);
+		printf("     Min Time     = %lld\n", postMinTime);
+		printf("     Max Time     = %lld\n", postMaxTime);
+		double avgTime = (double)postTTime/(double)postProcCnt;
+		printf("     Average Time = %.2f(%.2ffps)\n", avgTime, 1000./avgTime);
+
 	}
 
 	//==============================================================================
@@ -511,13 +613,22 @@ DEC_TERMINATE:
 		close(drmFd);
 	}
 
-#ifdef ANDROID
-	if( pAndRender )
-		delete pAndRender;
-#endif
-
 	if (pMediaReader)
 		delete pMediaReader;
+
+	for(int32_t i = 0; i < POST_OUT_BUF_CNT; i++)		
+	{
+		if(hPostOutVidMem[i])
+		{
+			NX_FreeVideoMemory(hPostOutVidMem[i]);
+			hPostOutVidMem[i] = NULL;
+		}
+	}
+
+	if (hPost)
+	{
+		DestroyPostProcessing(hPost);
+	}
 
 	printf("Decode End!!(ret = %d)\n", ret);
 	return ret;

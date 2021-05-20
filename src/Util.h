@@ -13,6 +13,8 @@ typedef struct CODEC_APP_DATA {
 	int32_t iSeekStartFrame;	/* Seek Start Frame */
 	int32_t iSeekPos;			/* Seek Position */
 	int32_t iMaxLimitFrame;		/* Max Limitation Frame */
+	int32_t iDisplayMode;		/* Display Mode */
+	int32_t iDisplayPriority;	/* Display Priority */
 
 	/* for Encoder Only Options */
 	int32_t width;				/* Input YUV Image Width */

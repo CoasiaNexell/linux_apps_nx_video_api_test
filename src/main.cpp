@@ -31,6 +31,11 @@
 extern int32_t VpuDecMain(CODEC_APP_DATA *pAppData);
 extern int32_t VpuEncMain(CODEC_APP_DATA *pAppData);
 
+#ifndef ANDROID
+//	Linux Only
+extern int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData );
+#endif
+
 #define MAX_FILE_LIST		256
 #define MAX_PATH_SIZE		1024
 
@@ -40,6 +45,7 @@ enum {
 	MODE_NONE,
 	DECODER_MODE,
 	ENCODER_MODE,
+	DECODER_POST_MODE,
 	MODE_MAX
 };
 
@@ -49,10 +55,12 @@ void print_usage(const char *appName)
 	printf(
 		"Usage : %s [options] -i [input file], [M] = mandatory, [O] = Optional \n"
 		"  common options :\n"
-		"     -m [mode]                  [O]  : 1:decoder mode, 2:encoder mode (def:decoder mode)\n"
+		"     -m [mode]                  [O]  : 1:decoder mode, 2:encoder mode, 3:decoder post mode (def:decoder mode)\n"
 		"     -i [input file name]       [M]  : input media file name (When is camera encoder, the value set NULL\n"
 		"     -o [output file name]      [O]  : output file name\n"
 		"     -r [repeat count]          [O]  : application repeat num. ( 0: unlimited repeat )\n"
+		"     -a [display mode]          [O]  : 0:aspect ratio, 1:org display, 2:dsp device (def:aspect ratio)\n"
+		"     -p [priority]              [O]  : 0/1/2(primary only) (def:none)\n"
 		"     -h : help\n"
 		" -------------------------------------------------------------------------------------------------------------------\n"
 		"  only decoder options :\n"
@@ -85,6 +93,9 @@ void print_usage(const char *appName)
 	printf(
 		" Encoder File Mode :(H.264, 1920x1080, 10Mbps, 30fps, 30 gop)\n"
 		"     #> %s -m 2 -i [input filename] -o [output filename] -s 1920,1080 -f 30,1 -b 10000 -g 30 \n", appName);
+	printf(
+		" Decoder Post Processing :\n"
+		"     #> %s -m 3 -i [input filename]\n", appName);
 }
 
 //------------------------------------------------------------------------------
@@ -205,14 +216,19 @@ int32_t main(int32_t argc, char *argv[])
 
 	CODEC_APP_DATA appData;
 	memset(&appData, 0, sizeof(CODEC_APP_DATA));
+	appData.iDisplayPriority = -1;
 
-	while (-1 != (opt = getopt(argc, argv, "m:i:o:hc:d:s:f:b:g:q:v:x:j:l:r:t:")))
+	while (-1 != (opt = getopt(argc, argv, "m:i:o:hc:d:s:f:b:g:q:v:x:j:l:r:t:a:p:")))
 	{
 		switch (opt)
 		{
 		case 'm':
 			mode = atoi(optarg);
+#ifdef ANDROID
 			if ((mode != DECODER_MODE) && (mode != ENCODER_MODE))
+#else
+			if ((mode != DECODER_MODE) && (mode != ENCODER_MODE) && (mode != DECODER_POST_MODE))
+#endif
 			{
 				printf("Error : invalid mode ( %d:decoder mode, %d:encoder mode )!!!\n", DECODER_MODE, ENCODER_MODE);
 				return -1;
@@ -235,6 +251,8 @@ int32_t main(int32_t argc, char *argv[])
 		case 'x':	appData.maxQp = atoi(optarg);  break;
 		case 'j':	sscanf(optarg, "%d,%d", &appData.iSeekStartFrame, &appData.iSeekPos);  break;
 		case 'r':	sscanf(optarg, "%u", &iRepeat);
+		case 'a':	appData.iDisplayMode = atoi(optarg); break;
+		case 'p':	appData.iDisplayPriority = atoi(optarg); break;
 		default:	break;
 		}
 	}
@@ -259,6 +277,9 @@ int32_t main(int32_t argc, char *argv[])
 				FreeFileList( pFileList, iFileNum );
 				appData.inFileName = NULL;
 			}
+			break;
+		case DECODER_POST_MODE:
+			iRet = VpuDecPostMain(&appData);
 			break;
 		case ENCODER_MODE:
 #ifndef ENABLE_3220
