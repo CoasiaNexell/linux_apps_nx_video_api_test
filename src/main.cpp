@@ -217,8 +217,9 @@ int32_t main(int32_t argc, char *argv[])
 	CODEC_APP_DATA appData;
 	memset(&appData, 0, sizeof(CODEC_APP_DATA));
 	appData.iDisplayPriority = -1;
+	appData.coeff = 2.5;
 
-	while (-1 != (opt = getopt(argc, argv, "m:i:o:hc:d:s:f:b:g:q:v:x:j:l:r:t:a:p:")))
+	while (-1 != (opt = getopt(argc, argv, "m:i:o:hc:d:s:f:b:g:q:v:x:j:l:r:t:a:p:k:")))
 	{
 		switch (opt)
 		{
@@ -253,6 +254,7 @@ int32_t main(int32_t argc, char *argv[])
 		case 'r':	sscanf(optarg, "%u", &iRepeat);
 		case 'a':	appData.iDisplayMode = atoi(optarg); break;
 		case 'p':	appData.iDisplayPriority = atoi(optarg); break;
+		case 'k':	appData.coeff = atof(optarg);  break;
 		default:	break;
 		}
 	}

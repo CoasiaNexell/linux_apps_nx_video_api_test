@@ -31,6 +31,9 @@ typedef struct CODEC_APP_DATA {
 	/* Output Options */
 	char *outFileName;			/* Output File Name */
 
+	/* Post Processing Parameter */
+	float coeff;				//	Filter coefficient
+
 	/* Dump Options */
 	uint32_t dumpFrameNumber;	/* Dump Frame Number */
 	char *dumpFileName;			/* Dump File Name */

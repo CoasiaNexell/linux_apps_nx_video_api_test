@@ -66,12 +66,13 @@ enum {
 #define	POST_OUT_BUF_CNT		(4)
 
 typedef struct _POST_PROC_DATA {
-	void		*handle;
-	uint32_t	mode;			//	0 : Deinterlace
-	uint32_t	srcWidth;
-	uint32_t	srcHeight;
-	uint32_t	dstWidth;
-	uint32_t	dstHeight;
+	void				*handle;
+	uint32_t			mode;			//	0 : Deinterlace
+	uint32_t			srcWidth;
+	uint32_t			srcHeight;
+	uint32_t			dstWidth;
+	uint32_t			dstHeight;
+	NX_MEMORY_HANDLE 	hMotionMem[2];
 } POST_PROC_DATA, *POSTPROC_HANDLE;
 
 extern bool bExitLoop;
@@ -114,12 +115,25 @@ static void register_signal( void )
 
 POSTPROC_HANDLE InitPostProcessing( uint32_t mode, uint32_t srcWidth, uint32_t srcHeight,
 						 uint32_t dstWidth, uint32_t dstHeight, 
-						 int (*pDstDmaFd)[3], int srcImageFormat, int32_t dstOutBufNum)
+						 int (*pDstDmaFd)[3], int srcImageFormat, int32_t dstOutBufNum, float coeff)
 {
 	POSTPROC_HANDLE hPost = (POSTPROC_HANDLE)malloc(sizeof(POST_PROC_DATA));
+	memset( hPost, 0, sizeof(POST_PROC_DATA) );
 	if( mode == POST_PROC_DEINT )		//	Deinterlace
 	{
-		hPost->handle = NX_GlDeinterlaceInit(srcWidth, srcHeight, dstWidth, dstHeight, pDstDmaFd, srcImageFormat, dstOutBufNum);	  /* deinterlace tool handle */
+		int motionFds[2];
+		hPost->hMotionMem[0] = NX_AllocateMemory( srcWidth*srcHeight, 16 );
+		hPost->hMotionMem[1] = NX_AllocateMemory( srcWidth*srcHeight, 16 );
+		if( NULL == hPost->hMotionMem[0] || NULL == hPost->hMotionMem[1] )
+		{
+			if( hPost->hMotionMem[0] )
+				NX_FreeMemory(hPost->hMotionMem[0]);
+			free(hPost);
+			return NULL;
+		}
+		motionFds[0] = hPost->hMotionMem[0]->dmaFd;
+		motionFds[1] = hPost->hMotionMem[1]->dmaFd;
+		hPost->handle = NX_GlDeinterlaceInit(srcWidth, srcHeight, dstWidth, dstHeight, pDstDmaFd, srcImageFormat, dstOutBufNum, motionFds, coeff);	  /* deinterlace tool handle */
 		if( !hPost->handle )
 		{
 			hPost->mode = POST_PROC_DEINT;
@@ -137,6 +151,12 @@ POSTPROC_HANDLE InitPostProcessing( uint32_t mode, uint32_t srcWidth, uint32_t s
 		return NULL;
 	}
 	return hPost;
+}
+
+//	only deinterlace
+int PostProcessingMotion(POSTPROC_HANDLE hPost, int *pSrcDmaFds, int *pSrcNDmaFds)
+{
+	return NX_GlDeinterlaceMotion(hPost->handle, pSrcDmaFds, pSrcNDmaFds );
 }
 
 int PostProcessing(POSTPROC_HANDLE hPost, int *pSrcDmaFds, int *pSrcNDmaFds, int *pDstDmaFds)
@@ -157,6 +177,10 @@ void DestroyPostProcessing(POSTPROC_HANDLE hPost)
 			if( hPost->mode == POST_PROC_DEINT )
 			{
 				NX_GlDeinterlaceDeInit(hPost->handle);
+				if( hPost->hMotionMem[0] )
+					NX_FreeMemory(hPost->hMotionMem[0]);
+				if( hPost->hMotionMem[1] )
+					NX_FreeMemory(hPost->hMotionMem[1]);
 			}
 		}
 		free( hPost );
@@ -428,7 +452,7 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 					outDmaFd[i][1] = hPostOutVidMem[i]->dmaFd[1];
 					outDmaFd[i][2] = hPostOutVidMem[i]->dmaFd[2];
 				}
-				hPost = InitPostProcessing(0, seqOut.width, seqOut.height, seqOut.width, seqOut.height, outDmaFd, nxImageFormat, POST_OUT_BUF_CNT);
+				hPost = InitPostProcessing(0, seqOut.width, seqOut.height, seqOut.width, seqOut.height, outDmaFd, nxImageFormat, POST_OUT_BUF_CNT, pAppData->coeff);
 				if(hPost == NULL)
 				{
 					printf( "InitPostProcessing(): Fail pGlHandle is NULL !!\n");
@@ -504,6 +528,8 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 
 					if( prvIndex >= 0 )
 					{
+						PostProcessingMotion( hPost, prevFds, decOut.hImg.dmaFd );
+
 						//	Deinterlace : Previous Even + Previous Odd
 						postSTime = NX_GetTickCount();
 						ret = PostProcessing( hPost, prevFds, NULL, hPostOutVidMem[postOutBufIdx]->dmaFd );
@@ -526,7 +552,7 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 						postOutBufIdx %= POST_OUT_BUF_CNT;
 #endif	//	ENABLE_DRM_DISPLAY
 
-						//	Deinterlace : Previous Even + Previous Odd
+						//	Deinterlace : Previous Odd + Current Even
 						postSTime = NX_GetTickCount();
 						ret = PostProcessing( hPost, prevFds, decOut.hImg.dmaFd, hPostOutVidMem[postOutBufIdx]->dmaFd );
 						postETime = NX_GetTickCount();
