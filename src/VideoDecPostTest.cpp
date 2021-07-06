@@ -16,6 +16,7 @@
 //	History		:
 //
 //------------------------------------------------------------------------------
+#define _FILE_OFFSET_BITS	64
 
 #include <stdio.h>
 
@@ -133,6 +134,10 @@ POSTPROC_HANDLE InitPostProcessing( uint32_t mode, uint32_t srcWidth, uint32_t s
 		}
 		motionFds[0] = hPost->hMotionMem[0]->dmaFd;
 		motionFds[1] = hPost->hMotionMem[1]->dmaFd;
+
+		NX_V4l2ClearMemory(hPost->hMotionMem[0]);
+		NX_V4l2ClearMemory(hPost->hMotionMem[1]);
+
 		hPost->handle = NX_GlDeinterlaceInit(srcWidth, srcHeight, dstWidth, dstHeight, pDstDmaFd, srcImageFormat, dstOutBufNum, motionFds, coeff);	  /* deinterlace tool handle */
 		if( !hPost->handle )
 		{
@@ -369,7 +374,7 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 
 		if (pAppData->outFileName)
 		{
-			fpOut = fopen(pAppData->outFileName, "wb");
+			fpOut = fopen64(pAppData->outFileName, "wb");
 			if (fpOut == NULL)
 			{
 				printf("output file open error!!\n");
@@ -521,11 +526,6 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 
 				if (curIndex >= 0)
 				{
-					if (fpOut)
-					{
-						NX_V4l2DumpMemory(hCurImg, fpOut);
-					}
-
 					if( prvIndex >= 0 )
 					{
 						PostProcessingMotion( hPost, prevFds, decOut.hImg.dmaFd );
@@ -547,6 +547,12 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 							printf("Fail, PostProcessing(). ret = %d\n", ret );
 							break;
 						}
+
+						if (fpOut)
+						{
+							NX_V4l2DumpMemory(hPostOutVidMem[postOutBufIdx], fpOut);
+						}
+
 #if ENABLE_DRM_DISPLAY
 						UpdateBuffer(hDsp, hPostOutVidMem[postOutBufIdx++], NULL);
 						postOutBufIdx %= POST_OUT_BUF_CNT;
@@ -563,6 +569,10 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 						{
 							printf("Fail, PostProcessing(). ret = %d\n", ret );
 							break;
+						}
+						if (fpOut)
+						{
+							NX_V4l2DumpMemory(hPostOutVidMem[postOutBufIdx], fpOut);
 						}
 #if ENABLE_DRM_DISPLAY
 						UpdateBuffer(hDsp, hPostOutVidMem[postOutBufIdx++], NULL);

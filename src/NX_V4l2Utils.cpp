@@ -471,7 +471,7 @@ int32_t NX_V4l2DumpMemory( NX_VID_MEMORY_INFO *pInMemory, const char *pOutFile )
 		}
 	}
 
-	FILE *pFile = fopen( pOutFile, "wb" );
+	FILE *pFile = fopen64( pOutFile, "wb" );
 	if( NULL == pFile )
 	{
 		printf("Fail, fopen(). ( %s )\n", pOutFile );
@@ -566,5 +566,20 @@ int32_t NX_V4l2DumpMemory( NX_VID_MEMORY_INFO *pInMemory, FILE *pFile )
 		}
 	}
 
+	return 0;
+}
+
+//------------------------------------------------------------------------------
+int32_t NX_V4l2ClearMemory( NX_MEMORY_INFO *pMem )
+{
+	if( NULL == pMem->pBuffer )
+	{
+		if( 0 > NX_MapMemory( pMem ) )
+		{
+			printf("Fail, NX_MapMemory().\n");
+			return -1;
+		}
+	}
+	memset( pMem->pBuffer, 0x00, pMem->size );
 	return 0;
 }

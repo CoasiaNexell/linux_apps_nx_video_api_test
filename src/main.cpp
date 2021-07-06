@@ -251,6 +251,7 @@ int32_t main(int32_t argc, char *argv[])
 		case 'v':	appData.vbv = atoi(optarg);  break;
 		case 'x':	appData.maxQp = atoi(optarg);  break;
 		case 'j':	sscanf(optarg, "%d,%d", &appData.iSeekStartFrame, &appData.iSeekPos);  break;
+		case 'l':	appData.iMaxLimitFrame = atoi(optarg); printf(">>>>>>>>>>> Limit = %d\n", appData.iMaxLimitFrame); break;
 		case 'r':	sscanf(optarg, "%u", &iRepeat);
 		case 'a':	appData.iDisplayMode = atoi(optarg); break;
 		case 'p':	appData.iDisplayPriority = atoi(optarg); break;

@@ -37,4 +37,6 @@ int32_t NX_V4l2LoadMemory( uint8_t *pInSrc, int32_t iWidth, int32_t iHeight, NX_
 int32_t NX_V4l2DumpMemory( NX_VID_MEMORY_INFO *pInMemory, const char *pOutFile );
 int32_t NX_V4l2DumpMemory( NX_VID_MEMORY_INFO *pInMemory, FILE *pFile );
 
+int32_t NX_V4l2ClearMemory( NX_MEMORY_INFO *pMem );
+
 #endif	// __NX_V4L2UTILS_H__
