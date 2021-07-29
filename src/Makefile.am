@@ -15,8 +15,13 @@ video_api_test_LDADD = \
 	-ldrm				\
 	-lnx_video_api		\
 	-lnx_drm_allocator	\
-	-lnx_v4l2 \
-	-lnx_gl_tools
+	-lnx_v4l2
+
+ifeq ($(TEST_POST_PROCESSING), true)
+AM_CFLAGS += -DTEST_POST_PROC
+AM_CPPFLAGS += -DTEST_POST_PROC
+video_api_test_LDADD += -lnx_gl_tools
+endif
 
 video_api_test_SOURCES = \
 	CodecInfo.cpp		\
@@ -28,8 +33,11 @@ video_api_test_SOURCES = \
 	Util.cpp			\
 	NX_V4l2Utils.cpp	\
 	VideoDecTest.cpp	\
-	VideoDecPostTest.cpp	\
 	VideoEncTest.cpp	\
 	main.cpp
+
+ifeq ($(TEST_POST_PROCESSING), true)
+video_api_test_SOURCES += VideoDecPostTest.cpp
+endif
 
 bin_PROGRAMS = video_api_test

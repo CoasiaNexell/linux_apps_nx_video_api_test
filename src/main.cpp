@@ -31,8 +31,7 @@
 extern int32_t VpuDecMain(CODEC_APP_DATA *pAppData);
 extern int32_t VpuEncMain(CODEC_APP_DATA *pAppData);
 
-#ifndef ANDROID
-//	Linux Only
+#ifdef TEST_POST_PROC
 extern int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData );
 #endif
 
@@ -281,9 +280,11 @@ int32_t main(int32_t argc, char *argv[])
 				appData.inFileName = NULL;
 			}
 			break;
+#ifdef TEST_POST_PROC
 		case DECODER_POST_MODE:
 			iRet = VpuDecPostMain(&appData);
 			break;
+#endif
 		case ENCODER_MODE:
 #ifndef ENABLE_3220
 			iRet = VpuEncMain(&appData);
