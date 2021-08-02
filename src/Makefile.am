@@ -17,7 +17,7 @@ video_api_test_LDADD = \
 	-lnx_drm_allocator	\
 	-lnx_v4l2
 
-ifeq ($(TEST_POST_PROCESSING), true)
+if TEST_POST_PROCESSING
 AM_CFLAGS += -DTEST_POST_PROC
 AM_CPPFLAGS += -DTEST_POST_PROC
 video_api_test_LDADD += -lnx_gl_tools
@@ -36,7 +36,7 @@ video_api_test_SOURCES = \
 	VideoEncTest.cpp	\
 	main.cpp
 
-ifeq ($(TEST_POST_PROCESSING), true)
+if TEST_POST_PROCESSING
 video_api_test_SOURCES += VideoDecPostTest.cpp
 endif
 

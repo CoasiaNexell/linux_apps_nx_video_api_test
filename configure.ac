@@ -33,6 +33,13 @@ AC_CHECK_TYPES([ptrdiff_t])
 
 AM_CONDITIONAL(TARGET_IS_64BIT, [test "$target" = aarch64-linux-gnu])
 
+post_proc="no"
+AC_ARG_ENABLE([post_proc],
+	[AC_HELP_STRING([--enable-post-proc]), [Enable post processing test(default disabled)]],
+	[post_proc=$enableval]
+)
+AM_CONDITIONAL(TEST_POST_PROCESSING, [test x$post_proc = xyes])
+
 # Checks for library functions.
 AC_FUNC_MALLOC
 AC_CHECK_FUNCS([gettimeofday memset strdup strerror])
