@@ -138,7 +138,7 @@ POSTPROC_HANDLE InitPostProcessing( uint32_t mode, uint32_t srcWidth, uint32_t s
 		NX_V4l2ClearMemory(hPost->hMotionMem[0]);
 		NX_V4l2ClearMemory(hPost->hMotionMem[1]);
 
-		hPost->handle = NX_GlDeinterlaceInit(srcWidth, srcHeight, dstWidth, dstHeight, pDstDmaFd, srcImageFormat, dstOutBufNum, motionFds, coeff);	  /* deinterlace tool handle */
+		hPost->handle = NX_GlDeinterlaceInit(srcWidth, srcHeight, dstWidth, dstHeight, pDstDmaFd, srcImageFormat, dstOutBufNum, DEINT_MODE_ADAPTIVE, motionFds, coeff);	  /* deinterlace tool handle */
 		if( !hPost->handle )
 		{
 			hPost->mode = POST_PROC_DEINT;
