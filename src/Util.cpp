@@ -95,27 +95,36 @@ static int32_t find_video_plane( int fd, int crtcIdx, uint32_t *connId, uint32_t
 
     drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
     pr = drmModeGetPlaneResources( fd );
+    if (pr == NULL)
+    {
+        goto ErrorExit;
+    }
 
     for( i=0 ; i<pr->count_planes ; ++i )
     {
         plane = drmModeGetPlane( fd, pr->planes[i] );
-        if( plane->possible_crtcs & possible_crtcs )
+        if(plane)
         {
-            for( j=0 ; j<plane->count_formats ; j++ )
+            if( plane->possible_crtcs & possible_crtcs )
             {
-                if( plane->formats[j]==DRM_FORMAT_YUV420 ||
-                    plane->formats[j]==DRM_FORMAT_YVU420 ||
-                    plane->formats[j]==DRM_FORMAT_UYVY ||
-                    plane->formats[j]==DRM_FORMAT_VYUY ||
-                    plane->formats[j]==DRM_FORMAT_YVYU ||
-                    plane->formats[j]==DRM_FORMAT_YUYV )
+                for( j=0 ; j<plane->count_formats ; j++ )
                 {
-                    found = 1;
-                    *planeId = plane->plane_id;
+                    if( plane->formats[j]==DRM_FORMAT_YUV420 ||
+                        plane->formats[j]==DRM_FORMAT_YVU420 ||
+                        plane->formats[j]==DRM_FORMAT_UYVY ||
+                        plane->formats[j]==DRM_FORMAT_VYUY ||
+                        plane->formats[j]==DRM_FORMAT_YVYU ||
+                        plane->formats[j]==DRM_FORMAT_YUYV )
+                    {
+                        found = 1;
+                        *planeId = plane->plane_id;
+                    }
                 }
             }
+            drmModeFreePlane(plane);
         }
     }
+    drmModeFreePlaneResources(pr);
     drmModeFreeResources(res);
     return found?0:-1;
 ErrorExit:
@@ -145,38 +154,47 @@ static int32_t find_rgb_plane( int fd, int32_t crtcIdx, int32_t layerIdx, uint32
 
     drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
     pr = drmModeGetPlaneResources( fd );
+    if (pr == NULL)
+    {
+        goto ErrorExit;
+    }
 
     for( i=0 ; i<pr->count_planes ; i++ )
     {
         plane = drmModeGetPlane( fd, pr->planes[i] );
-        if( plane->possible_crtcs & possible_crtcs )
+        if(plane)
         {
-            isRgb = 0;
-            for( j=0 ; j<plane->count_formats ; j++ )
+            if( plane->possible_crtcs & possible_crtcs )
             {
-                if( plane->formats[j]==DRM_FORMAT_ABGR8888 ||
-                    plane->formats[j]==DRM_FORMAT_RGBA8888 ||
-                    plane->formats[j]==DRM_FORMAT_XBGR8888 ||
-                    plane->formats[j]==DRM_FORMAT_RGBX8888 ||
-                    plane->formats[j]==DRM_FORMAT_RGB888 ||
-                    plane->formats[j]==DRM_FORMAT_BGR888 )
+                isRgb = 0;
+                for( j=0 ; j<plane->count_formats ; j++ )
                 {
-                    isRgb = 1;
+                    if( plane->formats[j]==DRM_FORMAT_ABGR8888 ||
+                        plane->formats[j]==DRM_FORMAT_RGBA8888 ||
+                        plane->formats[j]==DRM_FORMAT_XBGR8888 ||
+                        plane->formats[j]==DRM_FORMAT_RGBX8888 ||
+                        plane->formats[j]==DRM_FORMAT_RGB888 ||
+                        plane->formats[j]==DRM_FORMAT_BGR888 )
+                    {
+                        isRgb = 1;
+                    }
                 }
-            }
 
-            if( isRgb )
-            {
-                if( findIdx == layerIdx )
+                if( isRgb )
                 {
-                    found = 1;
-                    *planeId = plane->plane_id;
-                    break;
+                    if( findIdx == layerIdx )
+                    {
+                        found = 1;
+                        *planeId = plane->plane_id;
+                        break;
+                    }
+                    findIdx++;
                 }
-                findIdx++;
             }
+            drmModeFreePlane(plane);
         }
     }
+    drmModeFreePlaneResources(pr);
     drmModeFreeResources(res);
     return found?0:-1;
 ErrorExit:
