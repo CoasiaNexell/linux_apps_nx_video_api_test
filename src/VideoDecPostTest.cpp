@@ -39,12 +39,12 @@
 
 #include <videodev2_nxp_media.h>
 
-#define ENABLE_DRM_DISPLAY 1
+#define ENABLE_DRM_DISPLAY			(1)
 #define SCREEN_WIDTH				(1024)
 #define SCREEN_HEIGHT				(600)
 
-#if ENABLE_DRM_DISPLAY
 #include <drm/drm_fourcc.h>
+#if ENABLE_DRM_DISPLAY
 #include "DrmRender.h"
 #endif
 
@@ -64,11 +64,17 @@ enum {
 	POST_PROC_COPY
 };
 
+enum {
+	DEINT_MODE_ABLEND,			//	Advanced Blending Mode for 30 fsp
+	DEINT_MODE_MOTION,			//	Motion Adaptation Mode for 60fps
+};
+
 #define	POST_OUT_BUF_CNT		(4)
 
 typedef struct _POST_PROC_DATA {
 	void				*handle;
 	uint32_t			mode;			//	0 : Deinterlace
+	uint32_t			deintMode;		//	0 : Advanced Blending, 1 : Motion Adaptation
 	uint32_t			srcWidth;
 	uint32_t			srcHeight;
 	uint32_t			dstWidth;
@@ -76,7 +82,8 @@ typedef struct _POST_PROC_DATA {
 	NX_MEMORY_HANDLE 	hMotionMem[2];
 } POST_PROC_DATA, *POSTPROC_HANDLE;
 
-extern bool bExitLoop;
+bool IsRunningLoop();
+void ExitLoop(bool bExit);
 
 //----------------------------------------------------------------------------------------------------
 //
@@ -98,8 +105,8 @@ static void signal_handler( int32_t sig )
 			break;
 	}
 
-	if( !bExitLoop )
-		bExitLoop = true;
+	if( IsRunningLoop() )
+		ExitLoop( true );
 	else{
 		usleep(1000000);	//	wait 1 seconds for double Ctrl+C operation
 		exit(EXIT_FAILURE);
@@ -114,7 +121,11 @@ static void register_signal( void )
 	signal( SIGABRT, signal_handler );
 }
 
-POSTPROC_HANDLE InitPostProcessing( uint32_t mode, uint32_t srcWidth, uint32_t srcHeight,
+//
+//	mode : POST Processing Mode
+//			POST_PROC_DEINT
+//
+POSTPROC_HANDLE InitPostProcessing( uint32_t mode, uint32_t deintMode, uint32_t srcWidth, uint32_t srcHeight,
 						 uint32_t dstWidth, uint32_t dstHeight, 
 						 int (*pDstDmaFd)[3], int srcImageFormat, int32_t dstOutBufNum, float coeff)
 {
@@ -122,23 +133,36 @@ POSTPROC_HANDLE InitPostProcessing( uint32_t mode, uint32_t srcWidth, uint32_t s
 	memset( hPost, 0, sizeof(POST_PROC_DATA) );
 	if( mode == POST_PROC_DEINT )		//	Deinterlace
 	{
-		int motionFds[2];
-		hPost->hMotionMem[0] = NX_AllocateMemory( srcWidth*srcHeight, 16 );
-		hPost->hMotionMem[1] = NX_AllocateMemory( srcWidth*srcHeight, 16 );
-		if( NULL == hPost->hMotionMem[0] || NULL == hPost->hMotionMem[1] )
+		int motionFds[2] = {0, };
+		if( deintMode == DEINT_MODE_MOTION )
 		{
-			if( hPost->hMotionMem[0] )
-				NX_FreeMemory(hPost->hMotionMem[0]);
-			free(hPost);
-			return NULL;
+			hPost->hMotionMem[0] = NX_AllocateMemory( srcWidth*srcHeight, 16 );
+			hPost->hMotionMem[1] = NX_AllocateMemory( srcWidth*srcHeight, 16 );
+			if( NULL == hPost->hMotionMem[0] || NULL == hPost->hMotionMem[1] )
+			{
+				if( hPost->hMotionMem[0] )
+					NX_FreeMemory(hPost->hMotionMem[0]);
+				free(hPost);
+				return NULL;
+			}
+
+			motionFds[0] = hPost->hMotionMem[0]->dmaFd;
+			motionFds[1] = hPost->hMotionMem[1]->dmaFd;
+
+			NX_V4l2ClearMemory(hPost->hMotionMem[0]);
+			NX_V4l2ClearMemory(hPost->hMotionMem[1]);
+
+			hPost->handle = NX_GlDeinterlaceInit(srcWidth, srcHeight, dstWidth, dstHeight, pDstDmaFd, srcImageFormat, dstOutBufNum, DEINT_MODE_ADAPTIVE, motionFds, coeff);
 		}
-		motionFds[0] = hPost->hMotionMem[0]->dmaFd;
-		motionFds[1] = hPost->hMotionMem[1]->dmaFd;
+		else if( deintMode == DEINT_MODE_ABLEND )
+		{
+			hPost->handle = NX_GlDeinterlaceInit(srcWidth, srcHeight, dstWidth, dstHeight, pDstDmaFd, srcImageFormat, dstOutBufNum, DEINT_MODE_MIXING, NULL, coeff);
+		}
+		else
+		{
+			printf("Unknown deintMode = %d\n", deintMode);
+		}
 
-		NX_V4l2ClearMemory(hPost->hMotionMem[0]);
-		NX_V4l2ClearMemory(hPost->hMotionMem[1]);
-
-		hPost->handle = NX_GlDeinterlaceInit(srcWidth, srcHeight, dstWidth, dstHeight, pDstDmaFd, srcImageFormat, dstOutBufNum, DEINT_MODE_ADAPTIVE, motionFds, coeff);	  /* deinterlace tool handle */
 		if( !hPost->handle )
 		{
 			hPost->mode = POST_PROC_DEINT;
@@ -150,6 +174,7 @@ POSTPROC_HANDLE InitPostProcessing( uint32_t mode, uint32_t srcWidth, uint32_t s
 		hPost->srcHeight = srcHeight;
 		hPost->dstWidth = dstWidth;
 		hPost->dstHeight = dstHeight;
+		hPost->deintMode = deintMode;
 	}
 	else
 	{
@@ -226,8 +251,9 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 	uint32_t postOutBufIdx = 0;
 	int outDmaFd[POST_OUT_BUF_CNT][3];
 
+	uint32_t deintMode = pAppData->deintMode;
 
-	if( bExitLoop )
+	if( !IsRunningLoop() )
 		return -1;
 
 	CMediaReader *pMediaReader = new CMediaReader();
@@ -383,7 +409,7 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 			}
 		}
 
-		while(!bExitLoop)
+		while(IsRunningLoop())
 		{
 			int32_t key = 0;
 
@@ -457,7 +483,7 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 					outDmaFd[i][1] = hPostOutVidMem[i]->dmaFd[1];
 					outDmaFd[i][2] = hPostOutVidMem[i]->dmaFd[2];
 				}
-				hPost = InitPostProcessing(0, seqOut.width, seqOut.height, seqOut.width, seqOut.height, outDmaFd, nxImageFormat, POST_OUT_BUF_CNT, pAppData->coeff);
+				hPost = InitPostProcessing(0, deintMode, seqOut.width, seqOut.height, seqOut.width, seqOut.height, outDmaFd, nxImageFormat, POST_OUT_BUF_CNT, pAppData->coeff);
 				if(hPost == NULL)
 				{
 					printf( "InitPostProcessing(): Fail pGlHandle is NULL !!\n");
@@ -528,57 +554,90 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 				{
 					if( prvIndex >= 0 )
 					{
-						PostProcessingMotion( hPost, prevFds, decOut.hImg.dmaFd );
-
-						//	Deinterlace : Previous Even + Previous Odd
-						postSTime = NX_GetTickCount();
-						ret = PostProcessing( hPost, prevFds, NULL, hPostOutVidMem[postOutBufIdx]->dmaFd );
-						postETime = NX_GetTickCount();
-						postTTime += (postETime - postSTime);
-						if( postProcCnt == 0 )
+						//
+						//	Deinterlace Motion Adaptive Mode
+						//
+						if( deintMode == DEINT_MODE_ADAPTIVE )
 						{
-							postMinTime = postMaxTime = postETime - postSTime;
-						}
-						UpdateMinMaxTime( postMinTime, postMaxTime, postETime-postSTime );
+							PostProcessingMotion( hPost, prevFds, decOut.hImg.dmaFd );
 
-						postProcCnt ++;
-						if (ret < 0)
-						{
-							printf("Fail, PostProcessing(). ret = %d\n", ret );
-							break;
-						}
+							//	Deinterlace : Previous Even + Previous Odd
+							postSTime = NX_GetTickCount();
+							ret = PostProcessing( hPost, prevFds, NULL, hPostOutVidMem[postOutBufIdx]->dmaFd );
+							postETime = NX_GetTickCount();
+							postTTime += (postETime - postSTime);
+							if( postProcCnt == 0 )
+							{
+								postMinTime = postMaxTime = postETime - postSTime;
+							}
+							UpdateMinMaxTime( postMinTime, postMaxTime, postETime-postSTime );
 
-						if (fpOut)
-						{
-							NX_V4l2DumpMemory(hPostOutVidMem[postOutBufIdx], fpOut);
-						}
+							postProcCnt ++;
+							if (ret < 0)
+							{
+								printf("Fail, PostProcessing(). ret = %d\n", ret );
+								break;
+							}
+
+							if (fpOut)
+							{
+								NX_V4l2DumpMemory(hPostOutVidMem[postOutBufIdx], fpOut);
+							}
 
 #if ENABLE_DRM_DISPLAY
-						UpdateBuffer(hDsp, hPostOutVidMem[postOutBufIdx++], NULL);
-						postOutBufIdx %= POST_OUT_BUF_CNT;
+							UpdateBuffer(hDsp, hPostOutVidMem[postOutBufIdx++], NULL);
+							postOutBufIdx %= POST_OUT_BUF_CNT;
 #endif	//	ENABLE_DRM_DISPLAY
 
-						//	Deinterlace : Previous Odd + Current Even
-						postSTime = NX_GetTickCount();
-						ret = PostProcessing( hPost, prevFds, decOut.hImg.dmaFd, hPostOutVidMem[postOutBufIdx]->dmaFd );
-						postETime = NX_GetTickCount();
-						postTTime += (postETime - postSTime);
-						UpdateMinMaxTime( postMinTime, postMaxTime, postETime-postSTime );
-						postProcCnt ++;
-						if (ret < 0)
-						{
-							printf("Fail, PostProcessing(). ret = %d\n", ret );
-							break;
-						}
-						if (fpOut)
-						{
-							NX_V4l2DumpMemory(hPostOutVidMem[postOutBufIdx], fpOut);
-						}
+							//	Deinterlace : Previous Odd + Current Even
+							postSTime = NX_GetTickCount();
+							ret = PostProcessing( hPost, prevFds, decOut.hImg.dmaFd, hPostOutVidMem[postOutBufIdx]->dmaFd );
+							postETime = NX_GetTickCount();
+							postTTime += (postETime - postSTime);
+							UpdateMinMaxTime( postMinTime, postMaxTime, postETime-postSTime );
+							postProcCnt ++;
+							if (ret < 0)
+							{
+								printf("Fail, PostProcessing(). ret = %d\n", ret );
+								break;
+							}
+							if (fpOut)
+							{
+								NX_V4l2DumpMemory(hPostOutVidMem[postOutBufIdx], fpOut);
+							}
 #if ENABLE_DRM_DISPLAY
-						UpdateBuffer(hDsp, hPostOutVidMem[postOutBufIdx++], NULL);
-						postOutBufIdx %= POST_OUT_BUF_CNT;
+							UpdateBuffer(hDsp, hPostOutVidMem[postOutBufIdx++], NULL);
+							postOutBufIdx %= POST_OUT_BUF_CNT;
 #endif	//	ENABLE_DRM_DISPLAY
-					}
+						}
+						//
+						//	Deinterlace Advanced Blending Mode
+						//
+						else
+						{
+							//	Deinterlace
+							postSTime = NX_GetTickCount();
+							ret = PostProcessing( hPost, decOut.hImg.dmaFd, NULL, hPostOutVidMem[postOutBufIdx]->dmaFd );
+							postETime = NX_GetTickCount();
+							postTTime += (postETime - postSTime);
+							UpdateMinMaxTime( postMinTime, postMaxTime, postETime-postSTime );
+							postProcCnt ++;
+							if (ret < 0)
+							{
+								printf("Fail, PostProcessing(). ret = %d\n", ret );
+								break;
+							}
+							if (fpOut)
+							{
+								NX_V4l2DumpMemory(hPostOutVidMem[postOutBufIdx], fpOut);
+							}
+#if ENABLE_DRM_DISPLAY
+							UpdateBuffer(hDsp, hPostOutVidMem[postOutBufIdx++], NULL);
+							postOutBufIdx %= POST_OUT_BUF_CNT;
+#endif	//	ENABLE_DRM_DISPLAY
+						}
+
+					}	//	prvIndex >= 0
 
 					if( pAppData->dumpFileName && outFrmCnt==pAppData->dumpFrameNumber )
 					{
@@ -600,7 +659,7 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 					for( int ii=0 ; ii<4 ; ii++ )
 						prevFds[ii] = decOut.hImg.dmaFd[ii];
 					outFrmCnt++;
-				}
+				}	//	curIndex >= 0
 
 				frmCnt++;
 				additionSize = 0;
@@ -625,7 +684,7 @@ int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData )
 		if (fpOut)
 			fclose(fpOut);
 
-		printf(" Post Porcessing Result :\n");
+		printf(" Post Porcessing Result (deintMode = %s) :\n", (deintMode==1)?"Motion Adaptive Mode":"Advanced Blending Mode");
 		printf("     outFrameCnt  = %d\n", outFrmCnt);
 		printf("     postProcCnt  = %d\n", postProcCnt);
 		printf("     Total Time   = %lld\n", postTTime);
@@ -643,18 +702,19 @@ DEC_TERMINATE:
 	if (hDec)
 		ret = NX_V4l2DecClose(hDec);
 
-	if(hDsp)
+#if ENABLE_DRM_DISPLAY
+	if(hDsp != NULL)
 	{
 		DestroyDrmDisplay(hDsp);
 		close(drmFd);
 	}
-
-	if (pMediaReader)
+#endif // ENABLE_DRM_DISPLAY
+	if (pMediaReader != NULL)
 		delete pMediaReader;
 
 	for(int32_t i = 0; i < POST_OUT_BUF_CNT; i++)		
 	{
-		if(hPostOutVidMem[i])
+		if(hPostOutVidMem[i] != NULL)
 		{
 			NX_FreeVideoMemory(hPostOutVidMem[i]);
 			hPostOutVidMem[i] = NULL;

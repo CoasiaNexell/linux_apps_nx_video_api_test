@@ -17,11 +17,9 @@ video_api_test_LDADD = \
 	-lnx_drm_allocator	\
 	-lnx_v4l2
 
-if TEST_POST_PROCESSING
 AM_CFLAGS += -DTEST_POST_PROC
 AM_CPPFLAGS += -DTEST_POST_PROC
 video_api_test_LDADD += -lnx_gl_tools
-endif
 
 video_api_test_SOURCES = \
 	CodecInfo.cpp		\
@@ -36,8 +34,6 @@ video_api_test_SOURCES = \
 	VideoEncTest.cpp	\
 	main.cpp
 
-if TEST_POST_PROCESSING
 video_api_test_SOURCES += VideoDecPostTest.cpp
-endif
 
 bin_PROGRAMS = video_api_test

@@ -30,15 +30,30 @@
 //------------------------------------------------------------------------------
 extern int32_t VpuDecMain(CODEC_APP_DATA *pAppData);
 extern int32_t VpuEncMain(CODEC_APP_DATA *pAppData);
-
-#ifdef TEST_POST_PROC
 extern int32_t VpuDecPostMain ( CODEC_APP_DATA *pAppData );
-#endif
 
 #define MAX_FILE_LIST		256
 #define MAX_PATH_SIZE		1024
 
 bool bExitLoop = false;
+
+pthread_mutex_t gstExitLock= PTHREAD_MUTEX_INITIALIZER;
+
+bool IsRunningLoop()
+{
+	bool running;
+	pthread_mutex_lock(&gstExitLock);
+	running = !bExitLoop;
+	pthread_mutex_unlock(&gstExitLock);
+	return running;
+}
+
+void ExitLoop(bool bExit)
+{
+	pthread_mutex_lock(&gstExitLock);
+	bExitLoop = bExit;
+	pthread_mutex_unlock(&gstExitLock);
+}
 
 enum {
 	MODE_NONE,
@@ -95,6 +110,12 @@ void print_usage(const char *appName)
 	printf(
 		" Decoder Post Processing :\n"
 		"     #> %s -m 3 -i [input filename]\n", appName);
+	printf(
+		" Decoder Post Processing : deinterlace blending mode\n"
+		"     #> %s -m 3 -i [input filename] -u 0\n", appName);
+	printf(
+		" Decoder Post Processing : deinterlace motion adaptive mode\n"
+		"     #> %s -m 3 -i [input filename] -u 1\n", appName);
 }
 
 //------------------------------------------------------------------------------
@@ -209,6 +230,7 @@ int32_t main(int32_t argc, char *argv[])
 	int32_t iRet = 0;
 	int32_t opt;
 	int32_t mode = DECODER_MODE;
+	uint32_t deintMode = 1;	//	Deint Mode Motion Adpative Mode
 	uint32_t iRepeat = 1, iCount = 0;
 	// uint32_t iInstance = 1;
 	char szTemp[1024];
@@ -218,7 +240,7 @@ int32_t main(int32_t argc, char *argv[])
 	appData.iDisplayPriority = -1;
 	appData.coeff = 2.5;
 
-	while (-1 != (opt = getopt(argc, argv, "m:i:o:hc:d:s:f:b:g:q:v:x:j:l:r:t:a:p:k:")))
+	while (-1 != (opt = getopt(argc, argv, "m:i:o:hc:d:s:f:b:g:q:v:x:j:l:r:t:a:p:k:u:")))
 	{
 		switch (opt)
 		{
@@ -251,10 +273,11 @@ int32_t main(int32_t argc, char *argv[])
 		case 'x':	appData.maxQp = atoi(optarg);  break;
 		case 'j':	sscanf(optarg, "%d,%d", &appData.iSeekStartFrame, &appData.iSeekPos);  break;
 		case 'l':	appData.iMaxLimitFrame = atoi(optarg); printf(">>>>>>>>>>> Limit = %d\n", appData.iMaxLimitFrame); break;
-		case 'r':	sscanf(optarg, "%u", &iRepeat);
+		case 'r':	sscanf(optarg, "%u", &iRepeat); break;
 		case 'a':	appData.iDisplayMode = atoi(optarg); break;
 		case 'p':	appData.iDisplayPriority = atoi(optarg); break;
 		case 'k':	appData.coeff = atof(optarg);  break;
+		case 'u':	appData.deintMode = atoi(optarg);  break;
 		default:	break;
 		}
 	}
@@ -280,11 +303,9 @@ int32_t main(int32_t argc, char *argv[])
 				appData.inFileName = NULL;
 			}
 			break;
-#ifdef TEST_POST_PROC
 		case DECODER_POST_MODE:
 			iRet = VpuDecPostMain(&appData);
 			break;
-#endif
 		case ENCODER_MODE:
 #ifndef ENABLE_3220
 			iRet = VpuEncMain(&appData);

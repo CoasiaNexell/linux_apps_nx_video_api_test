@@ -37,6 +37,11 @@ CNX_AndroidRenderer::CNX_AndroidRenderer( int32_t iWndWidth, int32_t iWndHeight 
 
 CNX_AndroidRenderer::~CNX_AndroidRenderer()
 {
+	for( int32_t i=0 ; i<MAX_NUMBER_MEMORY ; i++ )
+	{
+		if( m_MemoryHandles[i] )
+			free(m_MemoryHandles[i]);
+	}
 }
 
 int32_t CNX_AndroidRenderer::GetBuffers( int32_t iNumBuf, int32_t iImgWidth, int32_t iImgHeight, NX_VID_MEMORY_HANDLE **pMemHandle )

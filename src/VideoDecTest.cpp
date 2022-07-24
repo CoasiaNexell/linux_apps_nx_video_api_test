@@ -51,8 +51,8 @@
 #define SCREEN_WIDTH				(1024)
 #define SCREEN_HEIGHT				(600)
 
-#if ENABLE_DRM_DISPLAY
 #include <drm/drm_fourcc.h>
+#if ENABLE_DRM_DISPLAY
 #include "DrmRender.h"
 #endif
 
@@ -66,7 +66,8 @@
 // #define PLANE_ID		33
 // #define CRTC_ID			32
 
-extern bool bExitLoop;
+bool IsRunningLoop();
+void ExitLoop(bool bExit);
 
 //----------------------------------------------------------------------------------------------------
 //
@@ -88,8 +89,8 @@ static void signal_handler( int32_t sig )
 			break;
 	}
 
-	if( !bExitLoop )
-		bExitLoop = true;
+	if( IsRunningLoop() )
+		ExitLoop( true );
 	else{
 		usleep(1000000);	//	wait 1 seconds for double Ctrl+C operation
 		exit(EXIT_FAILURE);
@@ -118,7 +119,7 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 	int32_t imgWidth = -1, imgHeight = -1;
 	int drmFd = 0;
 
-	if( bExitLoop )
+	if( !IsRunningLoop() )
 		return -1;
 
 	CMediaReader *pMediaReader = new CMediaReader();
@@ -271,7 +272,7 @@ int32_t VpuDecMain( CODEC_APP_DATA *pAppData )
 			}
 		}
 
-		while(!bExitLoop)
+		while(IsRunningLoop())
 		{
 			int32_t key = 0;
 
@@ -505,11 +506,13 @@ DEC_TERMINATE:
 	if (hDec)
 		ret = NX_V4l2DecClose(hDec);
 
+#if ENABLE_DRM_DISPLAY
 	if(hDsp)
 	{
 		DestroyDrmDisplay(hDsp);
 		close(drmFd);
 	}
+#endif
 
 #ifdef ANDROID
 	if( pAndRender )

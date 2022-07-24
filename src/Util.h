@@ -32,7 +32,8 @@ typedef struct CODEC_APP_DATA {
 	char *outFileName;			/* Output File Name */
 
 	/* Post Processing Parameter */
-	float coeff;				//	Filter coefficient
+	float coeff;				/*	Filter coefficient	*/
+	uint32_t deintMode;			/*	Deinterlace Mode = 0:Advanced blending, 1:Motion Adaptive */
 
 	/* Dump Options */
 	uint32_t dumpFrameNumber;	/* Dump Frame Number */
